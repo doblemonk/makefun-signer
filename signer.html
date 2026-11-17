@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign a make.fun message</title>
+<style>
+  body { background: #0f1220; color: #e8eaf2; font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 24px; }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  p { color: #aab; line-height: 1.5; }
+  pre { background: #171a2e; border: 1px solid #2a2e4a; border-radius: 10px; padding: 14px; white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.5; }
+  button { background: #e6007e; color: #fff; border: 0; border-radius: 10px; padding: 12px 18px; font-size: 16px; font-weight: 600; cursor: pointer; width: 100%; margin: 8px 0; }
+  button:disabled { background: #3a3e5c; cursor: default; }
+  button.secondary { background: #23264a; }
+  input[type=text] { width: 100%; box-sizing: border-box; background: #171a2e; color: #e8eaf2; border: 1px solid #2a2e4a; border-radius: 10px; padding: 12px; font-size: 13px; }
+  .ok { color: #4ade80; } .warn { color: #fbbf24; } .err { color: #f87171; }
+  .label { font-size: 13px; color: #aab; margin: 16px 0 6px; }
+  #status { min-height: 22px; margin: 8px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Sign a make.fun message</h1>
+  <p>This page runs entirely in your browser. It sends nothing anywhere. It signs <b>exactly the text shown below</b> with the wallet you connect — check the text before you tap Sign.</p>
+
+  <div class="label">Message to sign</div>
+  <pre id="msg"></pre>
+
+  <div class="label">Expected wallet</div>
+  <pre id="expected">2ygaA44iQRHPRYNMrPWxRnNyghMVpDRUoTEN29y5n16w</pre>
+
+  <button id="connect">1. Connect wallet</button>
+  <div id="status"></div>
+  <button id="sign" disabled>2. Sign the message above</button>
+
+  <div class="label">Signature (base58) — send this to your agent</div>
+  <input type="text" id="sig" readonly placeholder="—">
+  <button id="copy" class="secondary" disabled>Copy signature</button>
+</main>
+<script>
+(function () {
+  var EXPECTED = '2ygaA44iQRHPRYNMrPWxRnNyghMVpDRUoTEN29y5n16w';
+  var params = new URLSearchParams(location.search);
+  var message = params.get('message') || '';
+  document.getElementById('msg').textContent = message || '(no message in the link — ask your agent for a fresh link)';
+
+  var ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  function base58(bytes) {
+    var z = 0;
+    while (z < bytes.length && bytes[z] === 0) z++;
+    var digits = [0];
+    for (var i = z; i < bytes.length; i++) {
+      var carry = bytes[i];
+      for (var j = 0; j < digits.length; j++) {
+        carry += digits[j] << 8;
+        digits[j] = carry % 58;
+        carry = (carry / 58) | 0;
+      }
+      while (carry > 0) { digits.push(carry % 58); carry = (carry / 58) | 0; }
+    }
+    var out = '1'.repeat(z);
+    if (z < bytes.length) {
+      for (var m = digits.length - 1; m >= 0; m--) out += ALPHABET[digits[m]];
+    }
+    return out;
+  }
+
+  var status = document.getElementById('status');
+  var provider = null;
+
+  document.getElementById('connect').addEventListener('click', async function () {
+    try {
+      if (!window.solana) {
+        status.innerHTML = '<span class="err">No Solana wallet found in this browser. Open this page in Brave (the browser with your wallet).</span>';
+        return;
+      }
+      provider = window.solana;
+      var res = await provider.connect();
+      var addr = res.publicKey.toString();
+      if (addr === EXPECTED) {
+        status.innerHTML = '<span class="ok">Connected: ' + addr + ' (matches the expected wallet)</span>';
+      } else {
+        status.innerHTML = '<span class="warn">Connected: ' + addr + ' — this is NOT the expected wallet. Switch to the wallet that signed in to make.fun, then reconnect.</span>';
+      }
+      document.getElementById('sign').disabled = false;
+    } catch (e) {
+      status.innerHTML = '<span class="err">Connect failed: ' + (e && e.message ? e.message : e) + '</span>';
+    }
+  });
+
+  document.getElementById('sign').addEventListener('click', async function () {
+    if (!message) { status.innerHTML = '<span class="err">No message to sign.</span>'; return; }
+    if (!provider) { status.innerHTML = '<span class="err">Connect your wallet first.</span>'; return; }
+    try {
+      var encoded = new TextEncoder().encode(message);
+      var out = await provider.signMessage(encoded, 'utf8');
+      var sig = out.signature;
+      var b58;
+      if (typeof sig === 'string') {
+        var raw = atob(sig.replace(/-/g, '+').replace(/_/g, '/'));
+        var arr = new Uint8Array(raw.length);
+        for (var i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+        b58 = base58(arr);
+      } else {
+        b58 = base58(new Uint8Array(sig));
+      }
+      document.getElementById('sig').value = b58;
+      document.getElementById('copy').disabled = false;
+      status.innerHTML = '<span class="ok">Signed. Check the signature below, then send it to your agent.</span>';
+    } catch (e) {
+      status.innerHTML = '<span class="err">Sign failed: ' + (e && e.message ? e.message : e) + '</span>';
+    }
+  });
+
+  document.getElementById('copy').addEventListener('click', function () {
+    var el = document.getElementById('sig');
+    el.select();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(el.value);
+    } else {
+      document.execCommand('copy');
+    }
+  });
+})();
+</script>
+</body>
+</html>
